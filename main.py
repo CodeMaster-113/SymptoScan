@@ -1,9 +1,14 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import pandas as pd
-
+import zipfile
 # ------------------ Load Data ------------------
-df = pd.read_csv("sorted-symptoms and disease.csv")
+zip_path = "Disease-Symptoms.zip"
+csv_name = "sorted-symptoms and disease.csv"
+with zipfile.ZipFile(zip_path) as z:
+    # Read CSV directly into pandas
+    with z.open(csv_name) as f:
+        df = pd.read_csv(f)
 df1 = pd.read_csv("disease_remedy_lower.csv")
 
 disease_col = "diseases"
@@ -129,6 +134,7 @@ button_frame.grid(row=2, column=0, pady=10)
 def predict():
     name = name_entry.get().strip()
     age = age_entry.get().strip()
+    gender = gender_var.get()
 
     # ---------- Validation ----------
     if not name:
@@ -177,11 +183,14 @@ def predict():
     # ---------- Output ----------
     output_box.config(state=tk.NORMAL)
     output_box.delete("1.0", tk.END)
+    output_box.insert(tk.END,f"Name: {name}\tAge: {age}\tGender: {gender}\n")
 
     for i, (disease, _) in enumerate(results, 1):
         remedy = df1.loc[df1[condition_col] == disease, remedy_col]
         remedy = remedy.values[0] if not remedy.empty else "Consult the nearest medical facility immediately."
         output_box.insert(tk.END, f"{i}. {disease}\n   {remedy}\n\n")
+    
+    output_box.insert(tk.END, "If the symptoms persist or worsen by next 2 to 3 days, immediate medical treatment is advised.")
 
     output_box.config(state=tk.DISABLED)
 
