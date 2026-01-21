@@ -2,13 +2,14 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import pandas as pd
 import zipfile
+
 # ------------------ Load Data ------------------
 zip_path = "Disease-Symptoms.zip"
 csv_name = "sorted-symptoms and disease.csv"
 with zipfile.ZipFile(zip_path) as z:
-    # Read CSV directly into pandas
     with z.open(csv_name) as f:
         df = pd.read_csv(f)
+
 df1 = pd.read_csv("disease_remedy_lower.csv")
 
 disease_col = "diseases"
@@ -31,8 +32,7 @@ root.minsize(900, 600)
 root.configure(bg="#eef2f7")
 root.state("zoomed")
 
-# Make root resizable grid
-root.grid_rowconfigure(1, weight=1)
+root.grid_rowconfigure(2, weight=1)
 root.grid_columnconfigure(0, weight=1)
 
 # ------------------ Styles ------------------
@@ -58,17 +58,18 @@ style.configure("TButton",
                 font=("Segoe UI", 11),
                 padding=8)
 
-style.configure("Primary.TButton",
-                background="#2563eb",
-                foreground="white")
-
 # ------------------ Header ------------------
 header = ttk.Label(root, text="SymptoScan", style="Header.TLabel")
-header.grid(row=0, column=0, pady=15)
+header.grid(row=0, column=0, pady=(15, 5))
+
+ttk.Label(root,
+          text="⚠ This is a machine-based prediction may not be 100% accurate. If remedies do not work, seek immediate medical consultation.",
+          background="#eef2f7").grid(row=1, column=0)
+
 
 # ------------------ Main Container ------------------
 main_container = ttk.Frame(root, style="Card.TFrame", padding=15)
-main_container.grid(row=1, column=0, sticky="nsew", padx=20, pady=10)
+main_container.grid(row=3, column=0, sticky="nsew", padx=20, pady=10)
 
 main_container.grid_rowconfigure(3, weight=1)
 main_container.grid_columnconfigure(0, weight=1)
@@ -78,7 +79,7 @@ details_frame = ttk.Frame(main_container, style="Card.TFrame", padding=15)
 details_frame.grid(row=0, column=0, sticky="ew", pady=(0, 15))
 details_frame.grid_columnconfigure((0, 1, 2), weight=1)
 
-ttk.Label(details_frame, text="Enter Patient Details", style="Section.TLabel")\
+ttk.Label(details_frame, text="Enter Patient Details", style="Section.TLabel") \
     .grid(row=0, column=0, columnspan=3, pady=(0, 10))
 
 # Gender
@@ -102,14 +103,20 @@ age_entry.grid(row=2, column=2, sticky="ew", padx=5)
 # ------------------ Symptoms Section ------------------
 symptom_frame = ttk.Frame(main_container, style="Card.TFrame", padding=15)
 symptom_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 15))
-symptom_frame.grid_rowconfigure(1, weight=1)
+symptom_frame.grid_rowconfigure(2, weight=1)
 symptom_frame.grid_columnconfigure(0, weight=1)
 
-ttk.Label(symptom_frame, text="Select Your Symptoms", style="Section.TLabel")\
-    .grid(row=0, column=0, pady=(0, 10))
+ttk.Label(symptom_frame, text="Select Your Symptoms", style="Section.TLabel") \
+    .grid(row=0, column=0, pady=(0, 10), sticky="w")
+
+# Search box
+search_var = tk.StringVar()
+search_entry = ttk.Entry(symptom_frame, textvariable=search_var)
+search_entry.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+search_entry.insert(0, "Search symptoms...")
 
 listbox_frame = ttk.Frame(symptom_frame)
-listbox_frame.grid(row=1, column=0, sticky="nsew")
+listbox_frame.grid(row=2, column=0, sticky="nsew")
 
 listbox_frame.grid_rowconfigure(0, weight=1)
 listbox_frame.grid_columnconfigure(0, weight=1)
@@ -124,12 +131,24 @@ scrollbar = ttk.Scrollbar(listbox_frame, orient="vertical",
 scrollbar.grid(row=0, column=1, sticky="ns")
 symptom_listbox.config(yscrollcommand=scrollbar.set)
 
-for s in symptom_cols:
-    symptom_listbox.insert(tk.END, s)
+all_symptoms = list(symptom_cols)
+
+
+def update_listbox(*args):
+    symptom_listbox.delete(0, tk.END)
+    query = search_var.get().lower()
+    for s in all_symptoms:
+        if query in s.lower():
+            symptom_listbox.insert(tk.END, s)
+
+
+search_var.trace_add("write", update_listbox)
+update_listbox()
 
 # ------------------ Buttons ------------------
 button_frame = ttk.Frame(main_container)
 button_frame.grid(row=2, column=0, pady=10)
+
 
 def predict():
     name = name_entry.get().strip()
@@ -157,40 +176,38 @@ def predict():
     if not selected:
         messagebox.showwarning("Warning", "Please select at least one symptom.")
         return
-    # --------------------------------
 
-    # ---------- Disease Matching ----------
-    disease_scores = {}  # dictionary to store max score for each disease
+    # ---------- Disease Matching (FAST) ----------
+    scores = df[selected].sum(axis=1)
+    df_scores = df.loc[scores > 0, [disease_col]].copy()
+    df_scores["score"] = scores[scores > 0]
 
-    for _, row in df.iterrows():
-        disease = row[disease_col]
-        score = sum(row[s] == 1 for s in selected)
-        if score > 0:
-            # Keep the maximum score for each disease
-            if disease in disease_scores:
-                disease_scores[disease] = max(disease_scores[disease], score)
-            else:
-                disease_scores[disease] = score
-
-    if not disease_scores:
+    if df_scores.empty:
         messagebox.showinfo("No Match", "No diseases matched the selected symptoms.")
         return
 
-    # Sort diseases by score descending
-    sorted_diseases = sorted(disease_scores.items(), key=lambda x: x[1], reverse=True)
-    results = sorted_diseases[:5]  # top 5 matches
+    results = (
+        df_scores.groupby(disease_col)["score"]
+        .max()
+        .sort_values(ascending=False)
+        .head(5)
+        .reset_index()
+        .values.tolist()
+    )
 
     # ---------- Output ----------
     output_box.config(state=tk.NORMAL)
     output_box.delete("1.0", tk.END)
-    output_box.insert(tk.END,f"Name: {name}\tAge: {age}\tGender: {gender}\n")
+    output_box.insert(tk.END, f"Name: {name}    Age: {age}    Gender: {gender}\n")
+    output_box.insert(tk.END, "-" * 60 + "\n\n")
 
     for i, (disease, _) in enumerate(results, 1):
         remedy = df1.loc[df1[condition_col] == disease, remedy_col]
         remedy = remedy.values[0] if not remedy.empty else "Consult the nearest medical facility immediately."
-        output_box.insert(tk.END, f"{i}. {disease}\n   {remedy}\n\n")
-    
-    output_box.insert(tk.END, "If the symptoms persist or worsen by next 2 to 3 days, immediate medical treatment is advised.")
+        output_box.insert(tk.END, f"{i}. {disease}\n   Remedy: {remedy}\n\n")
+
+    output_box.insert(tk.END,
+                      "⚠ If symptoms persist or worsen within 2–3 days, seek medical attention immediately.")
 
     output_box.config(state=tk.DISABLED)
 
@@ -199,14 +216,16 @@ def clear_all():
     symptom_listbox.selection_clear(0, tk.END)
     name_entry.delete(0, tk.END)
     age_entry.delete(0, tk.END)
+    gender_box.current(0)
     output_box.config(state=tk.NORMAL)
     output_box.delete("1.0", tk.END)
     output_box.config(state=tk.DISABLED)
 
-ttk.Button(button_frame, text="Predict Disease", style="Primary.TButton",
-           command=predict).grid(row=0, column=0, padx=10)
 
-ttk.Button(button_frame, text="Clear", command=clear_all)\
+ttk.Button(button_frame, text="Predict Disease", command=predict) \
+    .grid(row=0, column=0, padx=10)
+
+ttk.Button(button_frame, text="Clear", command=clear_all) \
     .grid(row=0, column=1, padx=10)
 
 # ------------------ Output Section ------------------
@@ -215,7 +234,7 @@ output_frame.grid(row=3, column=0, sticky="nsew")
 output_frame.grid_rowconfigure(1, weight=1)
 output_frame.grid_columnconfigure(0, weight=1)
 
-ttk.Label(output_frame, text="Prediction Output", style="Section.TLabel")\
+ttk.Label(output_frame, text="Prediction Output", style="Section.TLabel") \
     .grid(row=0, column=0, sticky="w", pady=(0, 6))
 
 output_box = tk.Text(output_frame,
